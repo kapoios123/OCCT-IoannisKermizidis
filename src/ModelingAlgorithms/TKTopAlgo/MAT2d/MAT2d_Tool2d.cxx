@@ -180,6 +180,11 @@ int MAT2d_Tool2d::TangentBefore(const int anitem, const bool IsOpenResult)
 {
   int                       item;
   occ::handle<Geom2d_Curve> curve;
+  // f.CAD guard: index and item must be valid (release builds do not range-check sequences → garbage handle → crash)
+  if (anitem < 1 || anitem > theCircuit->NumberOfItems())
+    throw Standard_ConstructionError("MAT2d_Tool2d::TangentBefore: item index out of range");
+  if (theCircuit->Value(anitem).IsNull())
+    throw Standard_ConstructionError("MAT2d_Tool2d::TangentBefore: null item");
   theNumberOfVecs++;
 
   if (!IsOpenResult)
@@ -190,8 +195,12 @@ int MAT2d_Tool2d::TangentBefore(const int anitem, const bool IsOpenResult)
   {
     item = (anitem == theCircuit->NumberOfItems()) ? (anitem - 1) : (anitem + 1);
   }
+  if (item < 1 || item > theCircuit->NumberOfItems())
+    throw Standard_ConstructionError("MAT2d_Tool2d::TangentBefore: neighbour index out of range");
   if (theCircuit->ConnexionOn(item))
   {
+    if (theCircuit->Connexion(item).IsNull())
+      throw Standard_ConstructionError("MAT2d_Tool2d::TangentBefore: null connexion");
     double x1, y1, x2, y2;
     theCircuit->Connexion(item)->PointOnFirst().Coord(x1, y1);
     theCircuit->Connexion(item)->PointOnSecond().Coord(x2, y2);
@@ -238,6 +247,10 @@ int MAT2d_Tool2d::TangentAfter(const int anitem, const bool IsOpenResult)
   int                       item;
   occ::handle<Geom2d_Curve> curve;
   gp_Vec2d                  thevector;
+  if (anitem < 1 || anitem > theCircuit->NumberOfItems())
+    throw Standard_ConstructionError("MAT2d_Tool2d::TangentAfter: item index out of range");
+  if (theCircuit->Value(anitem).IsNull())
+    throw Standard_ConstructionError("MAT2d_Tool2d::TangentAfter: null item");
   theNumberOfVecs++;
 
   if (theCircuit->ConnexionOn(anitem))
