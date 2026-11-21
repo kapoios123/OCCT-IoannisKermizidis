@@ -17,6 +17,7 @@
 #define Debug(expr) std::cout << " MAT2d_Tool2d.cxx  :  expr :" << expr << std::endl;
 // #define OCCT_DEBUG
 
+#include <Standard_ConstructionError.hxx>
 #include <Bisector_Bisec.hxx>
 #include <Bisector_BisecAna.hxx>
 #include <Bisector_BisecCC.hxx>
@@ -207,8 +208,21 @@ int MAT2d_Tool2d::TangentBefore(const int anitem, const bool IsOpenResult)
   }
   else
   {
-    curve        = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
-    double param = (IsOpenResult && anitem == theCircuit->NumberOfItems())
+    // f.CAD fix: the neighbour of a point item may itself be a point (degenerate circuits, e.g. faces with several
+    // holes from Fusion 360 STEP files). down_cast then returned a null handle and curve->DN() dereferenced it
+    // (segfault natively, "null function" trap in WebAssembly). Walk on to the first real curve instead.
+    const int nbItems = theCircuit->NumberOfItems();
+    curve             = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
+    for (int k = 0; curve.IsNull() && k < nbItems; k++)
+    {
+      if (IsOpenResult && item == nbItems)
+        break;
+      item  = (item == nbItems) ? 1 : (item + 1);
+      curve = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
+    }
+    if (curve.IsNull())
+      throw Standard_ConstructionError("MAT2d_Tool2d::TangentBefore: no curve next to a point");
+    double param = (IsOpenResult && anitem == nbItems)
                      ? curve->LastParameter()
                      : curve->FirstParameter();
     theGeomVecs.Bind(theNumberOfVecs, curve->DN(param, 1));
@@ -253,7 +267,18 @@ int MAT2d_Tool2d::TangentAfter(const int anitem, const bool IsOpenResult)
       item = (anitem == 1) ? 2 : (anitem - 1);
     }
 
-    curve        = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
+    // f.CAD fix: same as in TangentBefore — skip point items backwards to the first real curve (no null dereference)
+    const int nbItems = theCircuit->NumberOfItems();
+    curve             = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
+    for (int k = 0; curve.IsNull() && k < nbItems; k++)
+    {
+      if (IsOpenResult && item == 1)
+        break;
+      item  = (item == 1) ? nbItems : (item - 1);
+      curve = occ::down_cast<Geom2d_Curve>(theCircuit->Value(item));
+    }
+    if (curve.IsNull())
+      throw Standard_ConstructionError("MAT2d_Tool2d::TangentAfter: no curve next to a point");
     double param = (IsOpenResult && anitem == 1) ? curve->FirstParameter() : curve->LastParameter();
     thevector    = curve->DN(param, 1);
   }
