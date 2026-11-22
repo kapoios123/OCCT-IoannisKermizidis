@@ -113,7 +113,15 @@ TopAbs_State TopOpeBRepBuild_CompositeClassifier::Compare(
       for (Bit2.Initialize(); Bit2.More(); Bit2.Next())
       {
         const TopoDS_Shape& s2 = MYBB->Element(Bit2);
-        CompareElement(s2);
+        // false: the block of L2 was already made into a shell (on an earlier comparison) and
+        // that shell is now the one to classify against. Stop, as the Shape/Block case does:
+        // adding the remaining faces again would put each of them twice in that shell, and the
+        // shell is frozen once classified (TopoDS_FrozenShape: a fillet on 2 separate edges
+        // that meet the same faces failed with this exception, each edge alone works).
+        if (!CompareElement(s2))
+        {
+          break;
+        }
       }
       state = State();
       yena1 = false;
