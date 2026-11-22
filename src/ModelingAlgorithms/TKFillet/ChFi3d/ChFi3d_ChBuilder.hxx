@@ -401,6 +401,8 @@ protected:
   Standard_EXPORT void SetRegul() override;
 
 private:
+  Standard_EXPORT bool PerformTwoCornerSameDiff(const int Index);
+
   Standard_EXPORT void ConexFaces(const occ::handle<ChFiDS_Spine>& Sp,
                                   const int                        IEdge,
                                   TopoDS_Face&                     F1,
