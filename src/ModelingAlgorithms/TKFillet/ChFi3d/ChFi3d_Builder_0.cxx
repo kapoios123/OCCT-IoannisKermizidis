@@ -3739,6 +3739,22 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
   // in the direction of the start/end line.
   gp_Vec Vint, Vref(pdeb, pfin);
   gp_Pnt Pbid;
+  // result of GeomInt with a bad tolerance, kept while the walking is tried (see below)
+  occ::handle<Geom_Curve>   aC3dInt;
+  occ::handle<Geom2d_Curve> aPc1Int, aPc2Int;
+  double                    aTolInt  = 0.;
+  bool                      isIntBad = false;
+  const auto useIntIfBetter          = [&](const bool theWalkDone) {
+    if (isIntBad && (!theWalkDone || tolreached >= aTolInt))
+    {
+      C3d        = aC3dInt;
+      Pc1        = aPc1Int;
+      Pc2        = aPc2Int;
+      tolreached = aTolInt;
+      return true;
+    }
+    return theWalkDone;
+  };
   double Udeb = 0., Ufin = 0.;
   double tolr1, tolr2;
   tolr1 = tolr2 = tolreached = tol3d;
@@ -4061,7 +4077,20 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
                 Pc2->Translate(gp_Vec2d(x, y));
               }
               tolreached = ChFi3d_EvalTolReached(S1, Pc1, S2, Pc2, C3d);
-              return true;
+              if (tolreached <= 10. * tol3d)
+              {
+                return true;
+              }
+              // The ends are right but the approximated line can be wrong between them: a line
+              // starting exactly on the seam of a periodic surface (a fillet torus at u = 0 going
+              // to u < 0) came out going round the torus (tolerance 1.9 mm on a 0.048 fillet).
+              // Keep it, and try the walking between the known ends: the better one is used.
+              aC3dInt  = C3d;
+              aPc1Int  = Pc1;
+              aPc2Int  = Pc2;
+              aTolInt  = tolreached;
+              isIntBad = true;
+              break;
             }
           }
         }
@@ -4100,20 +4129,20 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
     }
     if (!depok)
     {
-      return false;
+      return useIntIfBetter(false);
     }
     pintdep.Parameters(depart(1), depart(2), depart(3), depart(4));
     IntKK.Perform(depart);
     if (!IntKK.IsDone())
     {
-      return false;
+      return useIntIfBetter(false);
     }
     if (IntKK.NbPoints() <= 30)
     {
       Step *= 0.5;
       if (Step <= 0.0001)
       {
-        return false;
+        return useIntIfBetter(false);
       }
     }
     else
@@ -4175,7 +4204,7 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
       nbp = indf;
       if (nbp == 1)
       {
-        return false;
+        return useIntIfBetter(false);
       }
       // The extremities are inserted in the line if the extremity points on it
       // are too far and if pardeb and parfin are good.
@@ -4249,7 +4278,7 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
       approx.Perform(S1, S2, WL, true, true, true, 1, nbp);
       if (!approx.IsDone())
       {
-        return false;
+        return useIntIfBetter(false);
       }
       //      tolreached = approx.TolReached3d();
       //      double tolr2d = approx.TolReached2d();
@@ -4288,7 +4317,7 @@ bool ChFi3d_ComputeCurves(const occ::handle<Adaptor3d_Surface>& S1,
       tolreached                              = ChFi3d_EvalTolReached(S1, Pc1, S2, Pc2, C3d);
       tolreached                              = std::max(tolreached, ddeb);
       tolreached                              = std::max(tolreached, dfin);
-      return true;
+      return useIntIfBetter(true);
     }
   }
 }
