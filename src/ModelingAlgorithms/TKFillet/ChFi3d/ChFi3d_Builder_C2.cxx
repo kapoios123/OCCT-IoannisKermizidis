@@ -98,6 +98,55 @@ static void Reduce(const double& p1, const double& p2, occ::handle<GeomAdaptor_C
   }
 }
 
+//=================================================================================================
+
+static void AttachToPivot(ChFiDS_CommonPoint&       CPoff,
+                          const ChFiDS_CommonPoint& CPon,
+                          const TopoDS_Face&        Foff,
+                          const TopoDS_Vertex&      Vtx,
+                          const double              tol3d)
+{
+  const TopoDS_Edge& pivot = CPon.Arc();
+  TopExp_Explorer    ex(Foff, TopAbs_EDGE);
+  for (; ex.More() && !ex.Current().IsSame(pivot); ex.Next())
+  {
+  }
+  if (!ex.More() || BRep_Tool::IsClosed(pivot))
+  {
+    return;
+  }
+  BRepAdaptor_Curve C(pivot);
+  Extrema_ExtPC     ext(CPoff.Point(), C);
+  if (!ext.IsDone() || ext.NbExt() == 0)
+  {
+    return;
+  }
+  int imin = 1;
+  for (int i = 2; i <= ext.NbExt(); i++)
+  {
+    if (ext.SquareDistance(i) < ext.SquareDistance(imin))
+    {
+      imin = i;
+    }
+  }
+  const double tol = std::max(CPoff.Tolerance(), tol3d);
+  if (ext.SquareDistance(imin) > tol * tol)
+  {
+    return;
+  }
+  if (CPoff.Point().Distance(CPon.Point()) <= 10. * tol3d)
+  {
+    CPoff.SetArc(tol, pivot, CPon.ParameterOnArc(), CPon.TransitionOnArc());
+    return;
+  }
+  const double par  = ext.Point(imin).Parameter();
+  const double parV = BRep_Tool::Parameter(Vtx, pivot);
+  if (std::abs(par - parV) < std::abs(CPon.ParameterOnArc() - parV))
+  {
+    CPoff.SetArc(tol, pivot, par, CPon.TransitionOnArc());
+  }
+}
+
 //=======================================================================
 // function : PerformTwoCornerbyInter
 // purpose  : Performs PerformTwoCorner by intersection.
@@ -227,6 +276,14 @@ bool ChFi3d_Builder::PerformTwoCornerbyInter(const int Index)
   ChFiDS_CommonPoint& CP1 = Fd1->ChangeVertex(isfirst1, IFaArc1);
   ChFiDS_CommonPoint& CP2 = Fd2->ChangeVertex(isfirst2, IFaArc2);
 
+  if (CP1.IsOnArc() && !CP2.IsOnArc())
+  {
+    AttachToPivot(CP2, CP1, TopoDS::Face(DStr.Shape(Fd2->Index(IFaArc2))), Vtx, tolapp3d);
+  }
+  else if (CP2.IsOnArc() && !CP1.IsOnArc())
+  {
+    AttachToPivot(CP1, CP2, TopoDS::Face(DStr.Shape(Fd1->Index(IFaArc1))), Vtx, tolapp3d);
+  }
   if (!CP1.IsOnArc() || !CP2.IsOnArc())
   {
 #ifdef OCCT_DEBUG
