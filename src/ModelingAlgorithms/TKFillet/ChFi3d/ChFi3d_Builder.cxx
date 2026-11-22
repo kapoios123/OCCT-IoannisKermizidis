@@ -15,6 +15,13 @@
 // commercial license or contractual agreement.
 
 #include <Adaptor2d_Curve2d.hxx>
+#include <Adaptor3d_CurveOnSurface.hxx>
+#include <BRep_Builder.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepLib_ValidateEdge.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
+#include <GeomAdaptor_Surface.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <Blend_FuncInv.hxx>
 #include <BRepBlend_Line.hxx>
 #include <BRepLib.hxx>
@@ -669,6 +676,47 @@ void ChFi3d_Builder::Compute()
         const TopoDS_Shape& aF = aIt.Value();
         BRepLib::SameParameter(aF, SameParTol, true);
         ShapeFix::SameParameter(aF, false, SameParTol);
+      }
+    }
+
+    NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> anInitEdges;
+    for (TopExp_Explorer anExp(myShape, TopAbs_EDGE); anExp.More(); anExp.Next())
+    {
+      anInitEdges.Add(anExp.Current());
+    }
+    BRep_Builder aBB;
+    for (TopExp_Explorer anExpF(myShapeResult, TopAbs_FACE); anExpF.More(); anExpF.Next())
+    {
+      const TopoDS_Face&               aF    = TopoDS::Face(anExpF.Current());
+      occ::handle<GeomAdaptor_Surface> aSurf = new GeomAdaptor_Surface(BRep_Tool::Surface(aF));
+      for (TopExp_Explorer anExpE(aF, TopAbs_EDGE); anExpE.More(); anExpE.Next())
+      {
+        const TopoDS_Edge& aE = TopoDS::Edge(anExpE.Current());
+        if (anInitEdges.Contains(aE) || BRep_Tool::Degenerated(aE) || !BRep_Tool::SameParameter(aE)
+            || !BRep_Tool::IsGeometric(aE))
+        {
+          continue;
+        }
+        double                          aF2d, aL2d;
+        const occ::handle<Geom2d_Curve> aPC = BRep_Tool::CurveOnSurface(aE, aF, aF2d, aL2d);
+        if (aPC.IsNull())
+        {
+          continue;
+        }
+        occ::handle<Adaptor3d_CurveOnSurface> aCOS =
+          new Adaptor3d_CurveOnSurface(new Geom2dAdaptor_Curve(aPC, aF2d, aL2d), aSurf);
+        BRepLib_ValidateEdge aVE(new BRepAdaptor_Curve(aE), aCOS, true);
+        aVE.Process();
+        double aTol = BRep_Tool::Tolerance(aE);
+        if (aVE.IsDone() && !aVE.CheckTolerance(aTol))
+        {
+          aVE.UpdateTolerance(aTol);
+          aBB.UpdateEdge(aE, aTol);
+          for (TopoDS_Iterator aItV(aE); aItV.More(); aItV.Next())
+          {
+            aBB.UpdateVertex(TopoDS::Vertex(aItV.Value()), aTol);
+          }
+        }
       }
     }
   }
