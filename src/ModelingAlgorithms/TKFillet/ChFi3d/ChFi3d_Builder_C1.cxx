@@ -1823,6 +1823,49 @@ static bool IsShrink(const Geom2dAdaptor_Curve& PC,
   return false;
 }
 
+//=======================================================================
+// FCAD: start/end point of the face-fillet intersection on the end face, when the
+// edge has no pcurve on that face and the surface could not be extended. Without it
+// the point stayed (0,0): the intersection then started at the parametric origin and
+// the edge tolerance was inflated to "close" the face (valid by BRepCheck, wrong volume).
+// Projection on the face's own surface, inside its UV bounds (periodic surfaces too).
+//=======================================================================
+static bool FCAD_ProjectOnFace(const gp_Pnt& P, const TopoDS_Face& F, const double tol, gp_Pnt2d& UV)
+{
+  const occ::handle<Geom_Surface> S = BRep_Tool::Surface(F);
+  if (S.IsNull())
+  {
+    return false;
+  }
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(F, u0, u1, v0, v1);
+  const double du = 0.1 * (u1 - u0), dv = 0.1 * (v1 - v0);
+  GeomAdaptor_Surface AS(S, u0 - du, u1 + du, v0 - dv, v1 + dv);
+  Extrema_ExtPS ext(P, AS, Precision::PConfusion(), Precision::PConfusion(), Extrema_ExtFlag_MIN);
+  if (!ext.IsDone() || ext.NbExt() < 1)
+  {
+    return false;
+  }
+  int    best = 1;
+  double d2   = ext.SquareDistance(1);
+  for (int i = 2; i <= ext.NbExt(); i++)
+  {
+    if (ext.SquareDistance(i) < d2)
+    {
+      d2   = ext.SquareDistance(i);
+      best = i;
+    }
+  }
+  if (std::sqrt(d2) > std::max(tol, 1.e-4))
+  {
+    return false;
+  }
+  double u, v;
+  ext.Point(best).Parameter(u, v);
+  UV.SetCoord(u, v);
+  return true;
+}
+
 //=================================================================================================
 
 void ChFi3d_Builder::PerformIntersectionAtEnd(const int Index)
@@ -2745,6 +2788,14 @@ void ChFi3d_Builder::PerformIntersectionAtEnd(const int Index)
         {
           pfac1 = Hc1->Value(CV1.ParameterOnArc());
         }
+        if (Hc1.IsNull() && !(prolface[0] && Sfacemoins1->Value(pfac1.X(), pfac1.Y()).Distance(CV1.Point()) <= 10 * tolapp3d))
+        {
+          // FCAD: no pcurve, no extension (or a failed projection) -> the point was left at (0,0)
+          if (!FCAD_ProjectOnFace(CV1.Point(), F, 10 * tolapp3d, pfac1))
+          {
+            throw Standard_Failure("IntersectionAtEnd: start point not on the end face");
+          }
+        }
       }
       paredge1 = CV1.ParameterOnArc();
       if (Fi1.LineIndex() != 0)
@@ -2979,6 +3030,14 @@ void ChFi3d_Builder::PerformIntersectionAtEnd(const int Index)
       else
       {
         pfac2 = Hc2->Value(CV2.ParameterOnArc());
+      }
+      if (Hc2.IsNull() && !(prolface[0] && Sfacemoins1->Value(pfac2.X(), pfac2.Y()).Distance(CV2.Point()) <= 10 * tolapp3d))
+      {
+        // FCAD: same as for the start point (pfac1)
+        if (!FCAD_ProjectOnFace(CV2.Point(), Face[nbface - 1], 10 * tolapp3d, pfac2))
+        {
+          throw Standard_Failure("IntersectionAtEnd: end point not on the end face");
+        }
       }
       paredge2 = CV2.ParameterOnArc();
       if (Fi2.LineIndex() != 0)
