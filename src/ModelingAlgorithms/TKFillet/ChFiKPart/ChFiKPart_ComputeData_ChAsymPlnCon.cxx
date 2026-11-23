@@ -397,7 +397,8 @@ bool ChFiKPart_MakeChAsym(TopOpeBRepDS_DataStructure&         DStr,
     // pcurve on cone
     Pt.SetCoord(Or.X() + Rad * Dx.X(), Or.Y() + Rad * Dx.Y(), Or.Z() + Rad * Dx.Z());
     ElSLib::Parameters(Con, Pt, u, v);
-    double tol = Precision::PConfusion();
+    double tol           = Precision::PConfusion();
+    bool   careaboutsens = std::abs(lu - fu - 2 * M_PI) < tol;
     if (u >= 2 * M_PI - tol && u <= 2 * M_PI)
     {
       u = 0.;
@@ -415,16 +416,24 @@ bool ChFiKPart_MakeChAsym(TopOpeBRepDS_DataStructure&         DStr,
       u = ElCLib::InPeriod(u, fu, fu + 2 * M_PI);
     }
     ElSLib::D1(u, v, Con, Pt, deru, derv);
-    gp_Pnt2d p2dCon(u, v);
     gp_Dir2d d2dCon;
     if (deru.Dot(DSp) <= 0.)
     {
       d2dCon = -gp::DX2d();
+      if (careaboutsens && std::abs(fu - u) < tol)
+      {
+        u = lu;
+      }
     }
     else
     {
       d2dCon = gp::DX2d();
+      if (careaboutsens && std::abs(lu - u) < tol)
+      {
+        u = fu;
+      }
     }
+    gp_Pnt2d                 p2dCon(u, v);
     gp_Lin2d                 lin2dCon(p2dCon, d2dCon);
     occ::handle<Geom2d_Line> GLin2dCon = new Geom2d_Line(lin2dCon);
 
@@ -630,7 +639,8 @@ bool ChFiKPart_MakeChAsym(TopOpeBRepDS_DataStructure&         DStr,
 
     Pt.SetCoord(Or.X() + Rad * Dx.X(), Or.Y() + Rad * Dx.Y(), Or.Z() + Rad * Dx.Z());
     ElSLib::Parameters(Con, Pt, u, v);
-    double tol = Precision::PConfusion();
+    double tol           = Precision::PConfusion();
+    bool   careaboutsens = std::abs(lu - fu - 2 * M_PI) < tol;
     if (u >= 2 * M_PI - tol && u <= 2 * M_PI)
     {
       u = 0.;
@@ -648,16 +658,24 @@ bool ChFiKPart_MakeChAsym(TopOpeBRepDS_DataStructure&         DStr,
       u = ElCLib::InPeriod(u, fu, fu + 2 * M_PI);
     }
     ElSLib::D1(u, v, Con, Pt, deru, derv);
-    gp_Pnt2d p2dCon(u, v);
     gp_Dir2d d2dCon;
     if (deru.Dot(DSp) <= 0.)
     {
       d2dCon = -gp::DX2d();
+      if (careaboutsens && std::abs(fu - u) < tol)
+      {
+        u = lu;
+      }
     }
     else
     {
       d2dCon = gp::DX2d();
+      if (careaboutsens && std::abs(lu - u) < tol)
+      {
+        u = fu;
+      }
     }
+    gp_Pnt2d                 p2dCon(u, v);
     gp_Lin2d                 lin2dCon(p2dCon, d2dCon);
     occ::handle<Geom2d_Line> GLin2dCon = new Geom2d_Line(lin2dCon);
 
