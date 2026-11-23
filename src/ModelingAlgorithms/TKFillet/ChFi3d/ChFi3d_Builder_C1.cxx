@@ -279,6 +279,70 @@ static bool Update(const occ::handle<Adaptor3d_Surface>& fb,
 }
 
 //=======================================================================
+// function : CurveOnProlongedArc
+// purpose  : <Fop> and <Fv> share <E>, so the missing end of curve lies on
+//           the curve of <E>, from the parameter <parVtx> to the point <P>.
+//           Used when the intersection of the two faces cannot be walked,
+//           e.g. when they are tangent along <E>.
+//=======================================================================
+
+static bool CurveOnProlongedArc(const TopoDS_Edge&         E,
+                                const TopoDS_Face&         Fop,
+                                const TopoDS_Face&         Fv,
+                                const double               parVtx,
+                                const gp_Pnt&              P,
+                                const double               Tol,
+                                occ::handle<Geom_Curve>&   C3d,
+                                occ::handle<Geom2d_Curve>& C2dop,
+                                occ::handle<Geom2d_Curve>& C2dv,
+                                double&                    tolreached)
+{
+  double                  f, l;
+  occ::handle<Geom_Curve> C = BRep_Tool::Curve(E, f, l);
+  if (C.IsNull())
+  {
+    return false;
+  }
+  GeomAdaptor_Curve GC(C);
+  Extrema_ExtPC     ext(P, GC);
+  if (!ext.IsDone() || ext.NbExt() == 0)
+  {
+    return false;
+  }
+  int imin = 1;
+  for (int i = 2; i <= ext.NbExt(); i++)
+  {
+    if (ext.SquareDistance(i) < ext.SquareDistance(imin))
+    {
+      imin = i;
+    }
+  }
+  const double dist = std::sqrt(ext.SquareDistance(imin));
+  double       pv = parVtx, pe = ext.Point(imin).Parameter();
+  if (dist > Tol || std::abs(pe - pv) < Precision::PConfusion())
+  {
+    return false;
+  }
+  if (pe < pv)
+  {
+    pv = C->ReversedParameter(pv);
+    pe = C->ReversedParameter(pe);
+    C  = C->Reversed();
+  }
+  occ::handle<Geom_TrimmedCurve> TC = new Geom_TrimmedCurve(C, pv, pe);
+  double                         tolop = 0., tolv = 0.;
+  C2dop = GeomProjLib::Curve2d(TC, pv, pe, BRep_Tool::Surface(Fop), tolop);
+  C2dv  = GeomProjLib::Curve2d(TC, pv, pe, BRep_Tool::Surface(Fv), tolv);
+  if (C2dop.IsNull() || C2dv.IsNull())
+  {
+    return false;
+  }
+  C3d        = TC;
+  tolreached = std::max({tolreached, dist, tolop, tolv, BRep_Tool::Tolerance(E)});
+  return true;
+}
+
+//=======================================================================
 // function : IntersUpdateOnSame
 // purpose  : Intersect  curve <c3dFI> of ChFi-<Fop> interference with extended
 //           surface <HBs> of <Fprol> . Return intersection parameters in
@@ -1484,7 +1548,8 @@ void ChFi3d_Builder::PerformOneCorner(const int Index, const bool thePrepareOnSa
                               zob2dv,
                               tolapp3d,
                               tol2d,
-                              tolreached))
+                              tolreached)
+        && !CurveOnProlongedArc(Arcprol, Fop, Fv, parVtx, CPopArc.Point(), 10 * tolapp3d, zob3d, zob2dop, zob2dv, tolreached))
     {
       throw Standard_Failure("OneCorner : echec calcul intersection");
     }
