@@ -47,9 +47,10 @@
 
 void ChFi3d_ChBuilder::PerformTwoCorner(const int Index)
 {
-  if (!PerformTwoCornerSameDiff(Index))
+  if (!PerformTwoCornerSameDiff(Index) && !PerformTwoCornerbyInter(Index))
   {
-    PerformTwoCornerbyInter(Index);
+    PerformMoreThreeCorner(Index, 2);
+    done = true;
   }
 }
 
