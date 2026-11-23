@@ -1330,12 +1330,28 @@ void TopOpeBRepDS_BuildTool::UpdateSurface(const TopoDS_Shape& E,
                                            const TopoDS_Shape& oldF,
                                            const TopoDS_Shape& newF) const
 {
-  BRep_Builder                     BB;
-  double                           f, l;
-  const occ::handle<Geom2d_Curve>& PC =
-    BRep_Tool::CurveOnSurface(TopoDS::Edge(E), TopoDS::Face(oldF), f, l);
-  double tol = BRep_Tool::Tolerance(TopoDS::Face(oldF));
-  BB.UpdateEdge(TopoDS::Edge(E), PC, TopoDS::Face(newF), tol);
+  BRep_Builder       BB;
+  double             f, l;
+  const TopoDS_Edge& EE  = TopoDS::Edge(E);
+  const TopoDS_Face& FF  = TopoDS::Face(oldF);
+  const double       tol = BRep_Tool::Tolerance(FF);
+  if (BRep_Tool::IsClosed(EE, FF))
+  {
+    // seam edge: both p-curves are kept
+    TopLoc_Location                 L;
+    const occ::handle<Geom_Surface> S   = BRep_Tool::Surface(FF, L);
+    const TopoDS_Edge               EF  = TopoDS::Edge(EE.Oriented(TopAbs_FORWARD));
+    const TopoDS_Edge               ER  = TopoDS::Edge(EE.Oriented(TopAbs_REVERSED));
+    occ::handle<Geom2d_Curve>       PC1 = BRep_Tool::CurveOnSurface(EF, S, L, f, l);
+    occ::handle<Geom2d_Curve>       PC2 = BRep_Tool::CurveOnSurface(ER, S, L, f, l);
+    if (!PC1.IsNull() && !PC2.IsNull())
+    {
+      BB.UpdateEdge(EF, PC1, PC2, TopoDS::Face(newF), tol);
+      return;
+    }
+  }
+  const occ::handle<Geom2d_Curve>& PC = BRep_Tool::CurveOnSurface(EE, FF, f, l);
+  BB.UpdateEdge(EE, PC, TopoDS::Face(newF), tol);
 }
 
 /* // - merge 04-07-97
