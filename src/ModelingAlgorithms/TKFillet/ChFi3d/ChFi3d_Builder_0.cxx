@@ -28,6 +28,7 @@
 #include <BRepTopAdaptor_TopolTool.hxx>
 #include <BRep_Builder.hxx>
 #include <ChFi3d.hxx>
+#include <ChFiDS_ChamfSpine.hxx>
 #include <ChFiDS_FilSpine.hxx>
 #include <ElCLib.hxx>
 #include <ElSLib.hxx>
@@ -63,6 +64,7 @@
 #include <IntSurf_LineOn2S.hxx>
 #include <IntWalk_PWalking.hxx>
 #include <Law_Composite.hxx>
+#include <Precision.hxx>
 #include <ProjLib_ProjectedCurve.hxx>
 #include <Standard_NotImplemented.hxx>
 #include <gp_Pnt.hxx>
@@ -4821,6 +4823,79 @@ static bool GoodExt(const occ::handle<Geom_Curve>& C,
   return true;
 }
 
+//=======================================================================
+// function : AdjustEnd
+// purpose  : Deforms the curve on its last (or first) theLength so that
+//            it ends on theP with the tangent theT, keeping it C2.
+//=======================================================================
+static void AdjustEnd(occ::handle<Geom_BSplineCurve>& theCurve,
+                      const bool                      theAtEnd,
+                      const double                    theLength,
+                      const gp_Pnt&                   theP,
+                      const gp_Vec&                   theT)
+{
+  const double aW0 = theCurve->FirstParameter();
+  const double aW1 = theCurve->LastParameter();
+  const double aWc = theAtEnd ? aW1 - theLength : aW0 + theLength;
+  gp_Pnt       aP;
+  gp_Vec       aV;
+  theCurve->D1(theAtEnd ? aW1 : aW0, aP, aV);
+  const gp_Vec aTan = theT.Normalized();
+  const gp_XYZ aDP  = theP.XYZ() - aP.XYZ();
+  const gp_XYZ aDV  = ((aTan * (aTan * aV) - aV) * (theLength / 5.)).XYZ();
+
+  // quintic deformation, null with its two first derivatives at aWc
+  NCollection_Array1<gp_Pnt> aPoles(1, 11);
+  aPoles.Init(gp_Pnt(0., 0., 0.));
+  if (theAtEnd)
+  {
+    aPoles(9).SetXYZ(aDP - 2. * aDV);
+    aPoles(10).SetXYZ(aDP - aDV);
+    aPoles(11).SetXYZ(aDP);
+  }
+  else
+  {
+    aPoles(1).SetXYZ(aDP);
+    aPoles(2).SetXYZ(aDP + aDV);
+    aPoles(3).SetXYZ(aDP + 2. * aDV);
+  }
+  NCollection_Array1<double> aKnots(1, 3);
+  NCollection_Array1<int>    aMults(1, 3);
+  aKnots(1) = aW0;
+  aKnots(2) = aWc;
+  aKnots(3) = aW1;
+  aMults(1) = aMults(3) = 6;
+  aMults(2)             = 5;
+  occ::handle<Geom_BSplineCurve> aDef = new Geom_BSplineCurve(aPoles, aKnots, aMults, 5);
+  if (theCurve->Degree() < 5)
+  {
+    theCurve->IncreaseDegree(5);
+  }
+  aDef->IncreaseDegree(theCurve->Degree());
+  const int aMult = aDef->Multiplicity(2);
+  for (int i = 2; i < theCurve->NbKnots(); i++)
+  {
+    aDef->InsertKnot(theCurve->Knot(i), theCurve->Multiplicity(i), 0., false);
+  }
+  theCurve->InsertKnot(aWc, aMult, 0., false);
+  if (aDef->NbPoles() != theCurve->NbPoles())
+  {
+    return;
+  }
+  for (int i = 1; i <= aDef->NbPoles(); i++)
+  {
+    theCurve->SetPole(i, theCurve->Pole(i).Translated(gp_Vec(aDef->Pole(i).XYZ())));
+  }
+  for (int i = 2; i < theCurve->NbKnots(); i++)
+  {
+    if (std::abs(theCurve->Knot(i) - aWc) < Epsilon(aWc))
+    {
+      theCurve->RemoveKnot(i, theCurve->Degree() - 2, Precision::Confusion());
+      break;
+    }
+  }
+}
+
 //=================================================================================================
 
 Standard_EXPORT void ChFi3d_PerformElSpine(occ::handle<ChFiDS_ElSpine>& HES,
@@ -5315,7 +5390,7 @@ Standard_EXPORT void ChFi3d_PerformElSpine(occ::handle<ChFiDS_ElSpine>& HES,
   {
     // Otherwise is it necessary to move the poles to adapt
     // them to new tangents ?
-    bool   adjust = false;
+    bool   adjdeb = false, adjfin = false;
     gp_Pnt P1, P2;
     gp_Vec V1, V2;
     BSpline->D1(WF, P1, V1);
@@ -5326,7 +5401,7 @@ Standard_EXPORT void ChFi3d_PerformElSpine(occ::handle<ChFiDS_ElSpine>& HES,
     if ((std::abs(WF - LocalWF) < 1.e-12) && ((scaldeb <= 0.9999999) || disdeb >= tol))
     {
       // Yes if there was no extension and the tangent is not the good one.
-      adjust = true;
+      adjdeb = true;
     }
     BSpline->D1(WL, P2, V2);
     V2.Normalize();
@@ -5336,9 +5411,59 @@ Standard_EXPORT void ChFi3d_PerformElSpine(occ::handle<ChFiDS_ElSpine>& HES,
     if ((std::abs(WL - LocalWL) < 1.e-12) && ((scalfin <= 0.9999999) || disfin >= tol))
     {
       // the same at the end
-      adjust = true;
+      adjfin = true;
     }
-    if (adjust)
+    // A chamfer is measured from the guide: an extremity that is not adjusted
+    // keeps its point and tangent, an extended one is far from the end of the spine
+    occ::handle<ChFiDS_ChamfSpine> aChSp = occ::down_cast<ChFiDS_ChamfSpine>(Spine);
+    if (!aChSp.IsNull())
+    {
+      if (adjdeb && !adjfin)
+      {
+        PFin    = P2;
+        VrefFin = V2;
+      }
+      else if (adjfin && !adjdeb)
+      {
+        PDeb    = P1;
+        VrefDeb = V1;
+      }
+    }
+    const bool adjust = adjdeb || adjfin;
+    // and it is deformed only near the adjusted extremities
+    double aLength = 0.;
+    if (adjust && !aChSp.IsNull())
+    {
+      double aD1 = 0., aD2 = 0., anAng = 0.;
+      switch (aChSp->IsChamfer())
+      {
+        case ChFiDS_Sym:
+          aChSp->GetDist(aD1);
+          break;
+        case ChFiDS_TwoDist:
+          aChSp->Dists(aD1, aD2);
+          break;
+        case ChFiDS_DistAngle:
+          aChSp->GetDistAngle(aD1, anAng);
+          aD2 = aD1 * std::tan(std::min(anAng, 1.5));
+          break;
+        default:
+          break;
+      }
+      aLength = 2. * std::max(aD1, aD2);
+    }
+    if (aLength > 0. && 2. * aLength < WL - WF)
+    {
+      if (adjdeb)
+      {
+        AdjustEnd(BSpline, false, aLength, PDeb, VrefDeb);
+      }
+      if (adjfin)
+      {
+        AdjustEnd(BSpline, true, aLength, PFin, VrefFin);
+      }
+    }
+    else if (adjust)
     {
       occ::handle<Geom_BoundedCurve> anExtCurve = BSpline;
       GeomLib::AdjustExtremity(anExtCurve, PDeb, PFin, VrefDeb, VrefFin);
